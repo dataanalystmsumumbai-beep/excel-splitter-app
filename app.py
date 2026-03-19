@@ -2,89 +2,102 @@ import streamlit as st
 import pandas as pd
 import io
 import zipfile
+from datetime import datetime
 
 # App Configuration
-st.set_page_config(page_title="Ward-wise Excel Splitter", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="Ward Master Splitter", page_icon="🏢", layout="wide")
 
-st.title("Excel Ward-wise Master Splitter 📊")
-st.write("Upload your Excel file to split data by Ward into a single ZIP file.")
+st.title("Customized Ward-wise Excel Splitter 📊")
+st.write("Upload your Excel file, select Year/Month, and download Ward-wise consolidated files.")
+
+# --- UI for Year and Month Selection ---
+col1, col2 = st.columns(2)
+with col1:
+    years = [str(year) for year in range(2024, 2031)]
+    selected_year = st.selectbox("Select Year:", years, index=2) # Default 2026
+
+with col2:
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    selected_month = st.selectbox("Select Month:", months, index=1) # Default Feb
 
 # File uploader
 uploaded_file = st.file_uploader("Upload your Master Excel file (.xlsx)", type=['xlsx'])
 
 if uploaded_file is not None:
     try:
-        # Load the Excel file to get sheet names
         xls = pd.ExcelFile(uploaded_file)
         sheet_names = xls.sheet_names
         
         st.success(f"File loaded with {len(sheet_names)} sheets.")
         
-        # 1. Identify all unique Wards across all sheets
         all_wards = set()
-        data_dict = {} # To store data frames for each sheet
-        
-        with st.spinner('Processing sheets and identifying Wards...'):
+        data_dict = {} 
+        column_headers_dict = {} # To store headers if data is empty
+
+        with st.spinner('Analyzing Wards and Sheets...'):
             for sheet in sheet_names:
                 df = pd.read_excel(uploaded_file, sheet_name=sheet)
                 
-                # Check if 'Ward' column exists
+                # Store original headers (Col E to S) for empty sheets
+                if len(df.columns) >= 19:
+                    headers = df.iloc[:, 4:19].columns.tolist()
+                    column_headers_dict[sheet] = headers
+
                 if 'Ward' in df.columns:
-                    # Clean ward names (remove spaces)
                     df['Ward'] = df['Ward'].astype(str).str.strip()
                     unique_in_sheet = df['Ward'].unique().tolist()
                     all_wards.update(unique_in_sheet)
                     data_dict[sheet] = df
                 else:
-                    st.warning(f"Column 'Ward' not found in sheet: {sheet}. Skipping this sheet.")
+                    st.warning(f"Column 'Ward' not found in sheet: {sheet}")
 
-        # Remove any 'nan' or empty ward names from the list
-        all_wards = [w for w in all_wards if w != 'nan' and w != 'None' and w != '']
+        # Clean ward list
+        all_wards = [w for w in all_wards if w not in ['nan', 'None', '', 'nan']]
         
         if not all_wards:
-            st.error("No Wards found in the 'Ward' column across any sheets.")
+            st.error("No Wards found! Please check the 'Ward' column in your Excel.")
         else:
-            st.write(f"Found **{len(all_wards)}** unique Wards.")
+            st.info(f"Detected {len(all_wards)} Wards. Click below to generate files.")
             
-            # Button to process and Create ZIP
-            if st.button("🚀 Generate & Download All Ward Files (ZIP)"):
+            if st.button("🚀 Generate ZIP with Custom Naming"):
                 zip_buffer = io.BytesIO()
                 
                 with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
                     for ward in sorted(all_wards):
-                        # Create an Excel file for each Ward in memory
                         ward_buffer = io.BytesIO()
                         
                         with pd.ExcelWriter(ward_buffer, engine='openpyxl') as writer:
-                            for sheet_name, df in data_dict.items():
-                                # Filter data for this specific ward
-                                ward_df = df[df['Ward'] == ward].copy()
-                                
-                                if not ward_df.empty:
-                                    # 2. Select Columns E to S (Reporting Date to Facility Name Lform)
-                                    # Note: Python index starts at 0, so Col E is 4 and Col S is 18
-                                    # We use iloc to get columns from index 4 to 19 (19 is exclusive)
+                            for sheet_name in sheet_names:
+                                if sheet_name in data_dict:
+                                    df = data_dict[sheet_name]
+                                    ward_df = df[df['Ward'] == ward].copy()
+                                    
+                                    # Select Cols E to S
                                     if len(ward_df.columns) >= 19:
                                         ward_df = ward_df.iloc[:, 4:19]
                                     
-                                    # 3. Add Sr. No. at the beginning
+                                    # If no data for this ward, keep only headers
+                                    if ward_df.empty:
+                                        ward_df = pd.DataFrame(columns=column_headers_dict.get(sheet_name, []))
+                                    
+                                    # Add Sr. No. (even if empty, it's better to have the column)
                                     ward_df.insert(0, 'Sr. No.', range(1, len(ward_df) + 1))
                                     
-                                    # Write to sheet
                                     ward_df.to_excel(writer, index=False, sheet_name=sheet_name)
                         
-                        # Add this ward's Excel file to the ZIP
-                        zip_file.writestr(f"{ward}_Consolidated_Data.xlsx", ward_buffer.getvalue())
+                        # CUSTOM FILENAME LOGIC
+                        # Example: A_Ward_2026_Feb_Month Lab Confirmed Line List of Monsoon Related Diseases
+                        custom_filename = f"{ward}_Ward_{selected_year}_{selected_month}_Month Lab Confirmed Line List of Monsoon Related Diseases.xlsx"
+                        zip_file.writestr(custom_filename, ward_buffer.getvalue())
                 
-                st.success("All files processed successfully!")
+                st.success("All Ward files are ready!")
                 
-                # Download button for the ZIP file
                 st.download_button(
-                    label="📥 Download All Wards (ZIP)",
+                    label="📥 Download ZIP Folder",
                     data=zip_buffer.getvalue(),
-                    file_name="All_Wards_Data.zip",
+                    file_name=f"Wards_Data_{selected_month}_{selected_year}.zip",
                     mime="application/zip"
                 )
 
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        st.error(f"Something went wrong: {e}")
