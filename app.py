@@ -6,7 +6,7 @@ import zipfile
 # App Configuration
 st.set_page_config(page_title="Ward Master Splitter", page_icon="🏢", layout="wide")
 
-st.title("Customized Ward-wise Excel Splitter 📊")
+st.title("Ward-wise Excel Splitter 📊")
 st.write("Upload your Excel, select Year/Month, and download formatted Ward-wise files.")
 
 # --- UI for Year and Month Selection ---
